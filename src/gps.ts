@@ -2,16 +2,29 @@ import * as Location from 'expo-location';
 
 import type { LocationFix } from './types';
 
-export async function readCurrentLocation(): Promise<LocationFix> {
+export class LocationPermissionError extends Error {
+  constructor(public readonly canAskAgain: boolean) {
+    super('ლოკაციის ნებართვა არ არის მიცემული.');
+    this.name = 'LocationPermissionError';
+  }
+}
+
+export async function requestLocationPermission(): Promise<void> {
   const existing = await Location.getForegroundPermissionsAsync();
-  let status = existing.status;
-  if (status !== 'granted') {
-    const requested = await Location.requestForegroundPermissionsAsync();
-    status = requested.status;
+  if (existing.status === 'granted') {
+    return;
   }
-  if (status !== 'granted') {
-    throw new Error('ლოკაციის ნებართვა არ არის მიცემული.');
+
+  const result = existing.canAskAgain
+    ? await Location.requestForegroundPermissionsAsync()
+    : existing;
+  if (result.status !== 'granted') {
+    throw new LocationPermissionError(result.canAskAgain);
   }
+}
+
+export async function readCurrentLocation(): Promise<LocationFix> {
+  await requestLocationPermission();
 
   const position = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.High,

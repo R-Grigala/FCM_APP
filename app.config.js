@@ -37,6 +37,7 @@ module.exports = ({ config }) => {
     ...config,
     name: 'FCM და ლოკაცია',
     slug: config.slug ?? 'FCM_APP',
+    scheme: config.scheme ?? 'fcmapp',
     android: {
       ...config.android,
       package: ANDROID_PACKAGE,
@@ -54,6 +55,7 @@ module.exports = ({ config }) => {
       ...(iosServices ? { googleServicesFile: './GoogleService-Info.plist' } : {}),
     },
     plugins: [
+      'expo-router',
       '@react-native-firebase/app',
       '@react-native-firebase/messaging',
       [

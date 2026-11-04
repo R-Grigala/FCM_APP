@@ -1,2 +1,31 @@
-# FCM_APP
-FCM_APP is a lightweight Android application developed for testing Firebase Cloud Messaging (FCM) push notifications.
+# FCM და ლოკაცია
+
+Expo და React Native აპი Firebase Cloud Messaging-ის ტოკენის მისაღებად, ლოკაციის მისაღებად და სერვერზე გასაგზავნად. აპი ასევე იღებს FCM შეტყობინებებს და აჩვენებს ბოლო შეტყობინებას.
+
+## სერვერის მისამართი
+
+სერვერის მისამართი აპში აღარ იწერება. შეცვალეთ `API_BASE_URL` მნიშვნელობა [src/config.ts](src/config.ts)-ში და მიუთითეთ API-ის ძირითადი URL, მაგალითად `https://api.example.com`. მისამართი უნდა იყოს ხელმისაწვდომი ტელეფონიდან. ლოკალური ქსელის სერვერის გამოყენებისას ჩაწერეთ კომპიუტერის LAN IP და პორტი; `localhost` ტელეფონის საკუთარ მოწყობილობას ნიშნავს.
+
+მისამართი კოდში კონფიგურაციაა და საიდუმლო გასაღებებს არ უნდა შეიცავდეს. აპი backend-ის `/api/v1/devices/` და `/api/v1/location/<device_id>/` endpoint-ებს იყენებს. სერვერის API აღწერილია [docs/server-api.md](docs/server-api.md)-ში.
+
+## გაშვება და დაყენება
+
+1. დააყენეთ npm პაკეტები: `npm install`.
+2. Firebase Console-ში შექმენით Android აპი `com.fcmapp.location` პაკეტის სახელით და განათავსეთ `google-services.json` პროექტის root-ში.
+3. iOS-ისთვის შექმენით Firebase აპი `com.fcmapp.location` bundle ID-ით და განათავსეთ `GoogleService-Info.plist` root-ში.
+4. შეასწორეთ სერვერის endpoint `src/config.ts`-ში.
+5. შექმენით და დააინსტალირეთ development build, რადგან React Native Firebase Expo Go-ში არ მუშაობს. Android-ისთვის: `npx expo run:android`. iOS-ისთვის macOS/Xcode-ზე: `npx expo run:ios`; ან გამოიყენეთ EAS development build.
+6. გაუშვით Metro development build-ისთვის: `npx expo start --dev-client`.
+
+კონფიგურაციის დეტალები იხილეთ [docs/development.md](docs/development.md)-ში.
+
+## აპის ქცევა
+
+- მთავარ ეკრანსა და „პარამეტრების“ ჩანართს შორის აპის ქვედა ტაბით გადაერთეთ; გაზიარების და შეტყობინებების გადამრთველები პარამეტრების ჩანართშია.
+- ლოკაციის გაზიარების გადამრთველი ითხოვს foreground ლოკაციის ნებართვას და სერვერს უგზავნის გაზიარების მიმდინარე მდგომარეობას.
+- ლოკაციის გაზიარების გამორთვისას აპი აღარ კითხულობს და აღარ აგზავნის კოორდინატებს.
+- შეტყობინებების გადამრთველი FCM ტოკენს შლის აპიდან გამორთვისას. შეტყობინებების ნებართვისას მოწყობილობის რეგისტრაცია FCM ტოკენსაც უგზავნის სერვერს.
+- გაზიარების ჩართვისას მიმდინარე კოორდინატები მაშინვე იგზავნება; გაზიარების ჩართულ მდგომარეობაში აპის გახსნისასაც კოორდინატები ახლდება. მომხმარებელს მათი ხელახლა გაგზავნა მთავარ ეკრანზე არსებული ღილაკითაც შეუძლია. ფონურად კოორდინატები არ იგზავნება.
+- მოწყობილობის `device_id` ინსტალაციაზე ერთხელ იქმნება და AsyncStorage-ში ინახება.
+- FCM ტოკენი აპში ჩანს და კოპირება შეიძლება.
+- FCM background handler და push notification-ები მოითხოვს development build-ს.

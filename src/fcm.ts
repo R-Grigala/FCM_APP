@@ -3,9 +3,14 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { noticeFromMessage, presentNotice } from './notices';
+import { arePushNotificationsEnabled } from './storage';
 import type { PushNotice } from './types';
 
 type MessagingModule = typeof import('@react-native-firebase/messaging');
+export type NotificationPermission = {
+  granted: boolean;
+  canAskAgain: boolean;
+};
 
 const DEV_BUILD_MESSAGE =
   'FCM ტოკენი ამ გარემოში მიუწვდომელია. დაამატეთ google-services.json (Android) ან GoogleService-Info.plist (iOS) და გაუშვით development build.';
@@ -19,19 +24,30 @@ function messagingInstance() {
   return { messaging, instance: messaging.getMessaging() };
 }
 
+function permissionState(response: Notifications.NotificationPermissionsStatus): NotificationPermission {
+  return {
+    granted:
+      response.granted ||
+      response.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL,
+    canAskAgain: response.canAskAgain,
+  };
+}
+
+export async function getNotificationPermission(): Promise<NotificationPermission> {
+  return permissionState(await Notifications.getPermissionsAsync());
+}
+
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  const existing = await Notifications.getPermissionsAsync();
+  if (permissionState(existing).granted || !existing.canAskAgain) {
+    return permissionState(existing);
+  }
+  return permissionState(await Notifications.requestPermissionsAsync());
+}
+
 export async function obtainFcmToken(): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error(DEV_BUILD_MESSAGE);
-  }
-
-  const existing = await Notifications.getPermissionsAsync();
-  let status = existing.status;
-  if (status !== 'granted') {
-    const requested = await Notifications.requestPermissionsAsync();
-    status = requested.status;
-  }
-  if (status !== 'granted') {
-    throw new Error('შეტყობინებების ნებართვა არ არის მიცემული.');
   }
 
   if (Platform.OS === 'android') {
@@ -69,6 +85,14 @@ export async function obtainFcmToken(): Promise<string> {
   return token;
 }
 
+export async function disableFcmToken(): Promise<void> {
+  if (Platform.OS === 'web') {
+    return;
+  }
+  const { messaging, instance } = messagingInstance();
+  await messaging.deleteToken(instance);
+}
+
 export function subscribeToPush(onNotice: (notice: PushNotice) => void): () => void {
   if (Platform.OS === 'web') {
     return () => undefined;
@@ -84,22 +108,27 @@ export function subscribeToPush(onNotice: (notice: PushNotice) => void): () => v
     return () => undefined;
   }
 
-  const deliver = (message: RemoteMessage) => {
+  const deliver = async (message: RemoteMessage) => {
+    if (!(await arePushNotificationsEnabled())) {
+      return;
+    }
     onNotice(noticeFromMessage(message));
   };
 
   const unsubscribeMessage = messaging.onMessage(instance, (message) => {
-    const notice = noticeFromMessage(message);
-    onNotice(notice);
-    void presentNotice(notice);
+    void deliver(message).then(async () => {
+      if (await arePushNotificationsEnabled()) {
+        await presentNotice(noticeFromMessage(message));
+      }
+    });
   });
   const unsubscribeOpened = messaging.onNotificationOpenedApp(instance, deliver);
 
   void messaging
     .getInitialNotification(instance)
-    .then((message) => {
+    .then(async (message) => {
       if (message) {
-        deliver(message);
+        await deliver(message);
       }
     })
     .catch(() => undefined);

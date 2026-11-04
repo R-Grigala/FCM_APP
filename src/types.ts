@@ -12,9 +12,9 @@ export type LocationFix = {
 };
 
 export type LocationPayload = {
-  fcmToken: string;
+  device_id: string;
   latitude: number;
   longitude: number;
   accuracy: number | null;
-  recordedAt: string;
+  recorded_at: string;
 };
