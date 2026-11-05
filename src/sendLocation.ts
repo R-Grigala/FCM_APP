@@ -4,15 +4,7 @@ import { API_BASE_URL } from './config';
 const TIMEOUT_MS = 20_000;
 const API_ROOT = `${API_BASE_URL.replace(/\/+$/, '')}/api/v1`;
 
-type DeviceRegistration = {
-  device_id: string;
-  push_token?: string;
-  platform: 'ios' | 'android' | 'web';
-  language: 'ka' | 'en';
-  app_version: string;
-};
-
-async function request(url: string, method: 'POST' | 'PATCH', body: unknown): Promise<Response> {
+async function request(url: string, method: 'PATCH' | 'POST', body: unknown): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -41,13 +33,9 @@ async function request(url: string, method: 'POST' | 'PATCH', body: unknown): Pr
   }
 }
 
-export async function registerDevice(payload: DeviceRegistration): Promise<void> {
-  await request(`${API_ROOT}/devices/`, 'POST', payload);
-}
-
 export async function updateLocationSharing(deviceId: string, enabled: boolean): Promise<void> {
   await request(
-    `${API_ROOT}/location/${encodeURIComponent(deviceId)}/`,
+    `${API_ROOT}/devices/${encodeURIComponent(deviceId)}/location/`,
     'PATCH',
     { location_sharing_enabled: enabled },
   );
@@ -55,7 +43,7 @@ export async function updateLocationSharing(deviceId: string, enabled: boolean):
 
 export async function sendLocation(payload: LocationPayload): Promise<string> {
   const response = await request(
-    `${API_ROOT}/location/${encodeURIComponent(payload.device_id)}/`,
+    `${API_ROOT}/devices/${encodeURIComponent(payload.device_id)}/location/`,
     'POST',
     {
       latitude: payload.latitude,
