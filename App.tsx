@@ -23,7 +23,7 @@ import {
 import { deviceInit } from './src/deviceInit';
 import { readCurrentLocation } from './src/gps';
 import { sendLocation, updateLocationSharing } from './src/sendLocation';
-import { sendFcmToken } from './src/sendFcmToken';
+import { disableFcmTokenOnServer, sendFcmToken } from './src/sendFcmToken';
 import {
   isLocationSharingPending,
   loadLocationSharing,
@@ -62,17 +62,18 @@ export default function App() {
 
   const syncSharingStatus = useCallback(async (
     enabled: boolean,
+    deviceId: string,
   ) => {
-    const deviceId = await deviceInit();
     await updateLocationSharing(deviceId, enabled);
     await setLocationSharingPending(false);
   }, []);
 
-  const refreshToken = useCallback(async () => {
+  const refreshToken = useCallback(async (deviceId?: string) => {
     setTokenLoading(true);
     setTokenError(null);
     setCopied(false);
     try {
+      const registeredDeviceId = deviceId ?? (await deviceInit());
       const [permission, savedPreference] = await Promise.all([
         getNotificationPermission(),
         loadPushNotificationsEnabled(),
@@ -83,6 +84,7 @@ export default function App() {
       }
       const enabled = pushEnabled && permission.granted;
       if (!enabled) {
+        await disableFcmTokenOnServer(registeredDeviceId);
         setFcmToken(null);
         setTokenError(
           pushEnabled
@@ -93,8 +95,7 @@ export default function App() {
       }
       const token = await obtainFcmToken();
       setFcmToken(token);
-      const deviceId = await deviceInit();
-      await sendFcmToken(deviceId, token);
+      await sendFcmToken(registeredDeviceId, token);
     } catch (error) {
       setFcmToken(null);
       setTokenError(errorText(error, 'FCM ტოკენი ვერ მივიღე.'));
@@ -116,7 +117,7 @@ export default function App() {
     }
   }, []);
 
-  const updateAndSendLocation = useCallback(async () => {
+  const updateAndSendLocation = useCallback(async (deviceId?: string) => {
     if (!(await loadLocationSharing())) {
       return;
     }
@@ -128,14 +129,14 @@ export default function App() {
     try {
       const fix = await readCurrentLocation();
       setLocation(fix);
-      const deviceId = await deviceInit();
+      const registeredDeviceId = deviceId ?? (await deviceInit());
       if (fcmToken) {
-        await sendFcmToken(deviceId, fcmToken);
+        await sendFcmToken(registeredDeviceId, fcmToken);
       }
-      await updateLocationSharing(deviceId, true);
+      await updateLocationSharing(registeredDeviceId, true);
       await setLocationSharingPending(false);
       const result = await sendLocation({
-        device_id: deviceId,
+        device_id: registeredDeviceId,
         latitude: fix.latitude,
         longitude: fix.longitude,
         accuracy: fix.accuracy,
@@ -151,13 +152,18 @@ export default function App() {
     }
   }, [fcmToken]);
 
+  const runStartupChecks = useCallback(async () => {
+    const deviceId = await deviceInit();
+    await Promise.all([refreshToken(deviceId), updateAndSendLocation(deviceId)]);
+    return deviceId;
+  }, [refreshToken, updateAndSendLocation]);
+
   useEffect(() => {
     let unsubscribe: () => void = () => undefined;
     let active = true;
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        void refreshToken();
-        void updateAndSendLocation();
+        void runStartupChecks();
       }
     });
 
@@ -173,12 +179,14 @@ export default function App() {
       if (savedNotice) {
         setNotice(savedNotice);
       }
-      if (pending) {
-        try {
-          await syncSharingStatus(savedSharing);
-        } catch {
-          // Keep the pending flag so the settings screen can retry later.
+      try {
+        const deviceId = await deviceInit();
+        if (pending) {
+          await syncSharingStatus(savedSharing, deviceId);
         }
+        await Promise.all([refreshToken(deviceId), updateAndSendLocation(deviceId)]);
+      } catch {
+        // Keep the pending flag so the settings screen can retry later.
       }
       unsubscribe = subscribeToPush((incoming) => {
         setNotice(incoming);
@@ -186,14 +194,12 @@ export default function App() {
       });
     })();
 
-    void refreshToken();
-    void updateAndSendLocation();
     return () => {
       active = false;
       unsubscribe();
       appStateSubscription.remove();
     };
-  }, [refreshToken, syncSharingStatus, updateAndSendLocation]);
+  }, [refreshToken, runStartupChecks, syncSharingStatus, updateAndSendLocation]);
 
   useFocusEffect(useCallback(() => {
     let active = true;
