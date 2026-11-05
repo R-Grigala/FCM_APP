@@ -23,8 +23,9 @@ import {
   requestNotificationPermission,
 } from '../fcm';
 import { LocationPermissionError, readCurrentLocation, requestLocationPermission } from '../gps';
-import { registerDevice, sendLocation, updateLocationSharing } from '../sendLocation';
-import { APP_VERSION } from '../config';
+import { sendLocation, updateLocationSharing } from '../sendLocation';
+import { disableFcmTokenOnServer, sendFcmToken } from '../sendFcmToken';
+import { deviceInit } from '../deviceInit';
 import {
   isLocationSharingPending,
   loadDeviceId,
@@ -75,12 +76,7 @@ export default function SettingsScreen() {
 
     if (pending) {
       try {
-        await registerDevice({
-          device_id: id,
-          platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-          language: 'ka',
-          app_version: APP_VERSION,
-        });
+        await deviceInit();
         await updateLocationSharing(id, effectiveLocationEnabled);
         await setLocationSharingPending(false);
         setLocationMessage('გაზიარების მდგომარეობა სერვერთან სინქრონიზებულია.');
@@ -128,13 +124,10 @@ export default function SettingsScreen() {
           }
         }
       }
-      await registerDevice({
-        device_id: id,
-        ...(pushToken ? { push_token: pushToken } : {}),
-        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-        language: 'ka',
-        app_version: APP_VERSION,
-      });
+      await deviceInit();
+      if (pushToken) {
+        await sendFcmToken(id, pushToken);
+      }
       await updateLocationSharing(id, enabled);
       await setLocationSharingPending(false);
       if (!enabled) {
@@ -208,16 +201,14 @@ export default function SettingsScreen() {
         const pushToken = await obtainFcmToken();
         const id = deviceId ?? (await loadDeviceId());
         setDeviceId(id);
-        await registerDevice({
-          device_id: id,
-          push_token: pushToken,
-          platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-          language: 'ka',
-          app_version: APP_VERSION,
-        });
+        await deviceInit();
+        await sendFcmToken(id, pushToken);
         await savePushNotificationsEnabled(true);
         setNotificationsEnabled(true);
       } else {
+        const id = deviceId ?? (await loadDeviceId());
+        setDeviceId(id);
+        await disableFcmTokenOnServer(id);
         await disableFcmToken();
         await savePushNotificationsEnabled(false);
         setNotificationsEnabled(false);

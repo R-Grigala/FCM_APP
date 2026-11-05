@@ -20,12 +20,12 @@ import {
   obtainFcmToken,
   subscribeToPush,
 } from './src/fcm';
+import { deviceInit } from './src/deviceInit';
 import { readCurrentLocation } from './src/gps';
-import { registerDevice, sendLocation, updateLocationSharing } from './src/sendLocation';
-import { APP_VERSION } from './src/config';
+import { sendLocation, updateLocationSharing } from './src/sendLocation';
+import { sendFcmToken } from './src/sendFcmToken';
 import {
   isLocationSharingPending,
-  loadDeviceId,
   loadLocationSharing,
   loadNotice,
   loadPushNotificationsEnabled,
@@ -62,15 +62,9 @@ export default function App() {
 
   const syncSharingStatus = useCallback(async (
     enabled: boolean,
-    id: string,
   ) => {
-    await registerDevice({
-      device_id: id,
-      platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-      language: 'ka',
-      app_version: APP_VERSION,
-    });
-    await updateLocationSharing(id, enabled);
+    const deviceId = await deviceInit();
+    await updateLocationSharing(deviceId, enabled);
     await setLocationSharingPending(false);
   }, []);
 
@@ -97,7 +91,10 @@ export default function App() {
         );
         return;
       }
-      setFcmToken(await obtainFcmToken());
+      const token = await obtainFcmToken();
+      setFcmToken(token);
+      const deviceId = await deviceInit();
+      await sendFcmToken(deviceId, token);
     } catch (error) {
       setFcmToken(null);
       setTokenError(errorText(error, 'FCM ტოკენი ვერ მივიღე.'));
@@ -131,14 +128,10 @@ export default function App() {
     try {
       const fix = await readCurrentLocation();
       setLocation(fix);
-      const deviceId = await loadDeviceId();
-      await registerDevice({
-        device_id: deviceId,
-        ...(fcmToken ? { push_token: fcmToken } : {}),
-        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-        language: 'ka',
-        app_version: APP_VERSION,
-      });
+      const deviceId = await deviceInit();
+      if (fcmToken) {
+        await sendFcmToken(deviceId, fcmToken);
+      }
       await updateLocationSharing(deviceId, true);
       await setLocationSharingPending(false);
       const result = await sendLocation({
@@ -169,10 +162,9 @@ export default function App() {
     });
 
     void (async () => {
-      const [savedNotice, savedSharing, savedDeviceId, pending] = await Promise.all([
+      const [savedNotice, savedSharing, pending] = await Promise.all([
         loadNotice(),
         loadLocationSharing(),
-        loadDeviceId(),
         isLocationSharingPending(),
       ]);
       if (!active) {
@@ -183,7 +175,7 @@ export default function App() {
       }
       if (pending) {
         try {
-          await syncSharingStatus(savedSharing, savedDeviceId);
+          await syncSharingStatus(savedSharing);
         } catch {
           // Keep the pending flag so the settings screen can retry later.
         }
@@ -246,14 +238,10 @@ export default function App() {
     setSendError(null);
     setSendMessage(null);
     try {
-      const deviceId = await loadDeviceId();
-      await registerDevice({
-        device_id: deviceId,
-        ...(fcmToken ? { push_token: fcmToken } : {}),
-        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
-        language: 'ka',
-        app_version: APP_VERSION,
-      });
+      const deviceId = await deviceInit();
+      if (fcmToken) {
+        await sendFcmToken(deviceId, fcmToken);
+      }
       const result = await sendLocation({
         device_id: deviceId,
         latitude: location.latitude,
