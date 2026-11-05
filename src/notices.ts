@@ -2,6 +2,7 @@ import type { RemoteMessage } from '@react-native-firebase/messaging';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { arePushNotificationsEnabled } from './storage';
 import type { PushNotice } from './types';
 
 Notifications.setNotificationHandler({
@@ -55,7 +56,7 @@ async function ensureAndroidChannel(): Promise<void> {
 }
 
 export async function presentNotice(notice: PushNotice): Promise<void> {
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' || !(await arePushNotificationsEnabled())) {
     return;
   }
 
@@ -71,6 +72,9 @@ export async function presentNotice(notice: PushNotice): Promise<void> {
 }
 
 export async function showBackgroundNotice(message: RemoteMessage): Promise<void> {
+  if (!(await arePushNotificationsEnabled())) {
+    return;
+  }
   if (message.notification) {
     return;
   }

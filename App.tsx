@@ -1,23 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 
-import { obtainFcmToken, subscribeToPush } from './src/fcm';
+import {
+  getNotificationPermission,
+  obtainFcmToken,
+  subscribeToPush,
+} from './src/fcm';
 import { readCurrentLocation } from './src/gps';
-import { sendLocation } from './src/sendLocation';
-import { loadNotice, loadServerUrl, saveNotice, saveServerUrl } from './src/storage';
+import { registerDevice, sendLocation, updateLocationSharing } from './src/sendLocation';
+import { APP_VERSION } from './src/config';
+import {
+  isLocationSharingPending,
+  loadDeviceId,
+  loadLocationSharing,
+  loadNotice,
+  loadPushNotificationsEnabled,
+  savePushNotificationsEnabled,
+  saveNotice,
+  setLocationSharingPending,
+} from './src/storage';
 import type { LocationFix, PushNotice } from './src/types';
 
 function errorText(error: unknown, fallback: string): string {
@@ -36,20 +51,52 @@ export default function App() {
 
   const [location, setLocation] = useState<LocationFix | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [locationLoading, setLocationLoading] = useState(true);
+  const [locationLoading, setLocationLoading] = useState(false);
 
-  const [serverUrl, setServerUrl] = useState('');
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
   const [notice, setNotice] = useState<PushNotice | null>(null);
+  const [sharingEnabled, setSharingEnabled] = useState(false);
+
+  const syncSharingStatus = useCallback(async (
+    enabled: boolean,
+    id: string,
+  ) => {
+    await registerDevice({
+      device_id: id,
+      platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
+      language: 'ka',
+      app_version: APP_VERSION,
+    });
+    await updateLocationSharing(id, enabled);
+    await setLocationSharingPending(false);
+  }, []);
 
   const refreshToken = useCallback(async () => {
     setTokenLoading(true);
     setTokenError(null);
     setCopied(false);
     try {
+      const [permission, savedPreference] = await Promise.all([
+        getNotificationPermission(),
+        loadPushNotificationsEnabled(),
+      ]);
+      const pushEnabled = savedPreference ?? permission.granted;
+      if (savedPreference === null) {
+        await savePushNotificationsEnabled(pushEnabled);
+      }
+      const enabled = pushEnabled && permission.granted;
+      if (!enabled) {
+        setFcmToken(null);
+        setTokenError(
+          pushEnabled
+            ? 'შეტყობინებების სისტემური ნებართვა გამორთულია.'
+            : 'Push შეტყობინებები გამორთულია. ჩასართავად გამოიყენეთ გადამრთველი.',
+        );
+        return;
+      }
       setFcmToken(await obtainFcmToken());
     } catch (error) {
       setFcmToken(null);
@@ -72,18 +119,74 @@ export default function App() {
     }
   }, []);
 
+  const updateAndSendLocation = useCallback(async () => {
+    if (!(await loadLocationSharing())) {
+      return;
+    }
+
+    setLocationLoading(true);
+    setLocationError(null);
+    setSendError(null);
+    setSendMessage(null);
+    try {
+      const fix = await readCurrentLocation();
+      setLocation(fix);
+      const deviceId = await loadDeviceId();
+      await registerDevice({
+        device_id: deviceId,
+        ...(fcmToken ? { push_token: fcmToken } : {}),
+        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
+        language: 'ka',
+        app_version: APP_VERSION,
+      });
+      await updateLocationSharing(deviceId, true);
+      await setLocationSharingPending(false);
+      const result = await sendLocation({
+        device_id: deviceId,
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        accuracy: fix.accuracy,
+        recorded_at: fix.recordedAt,
+      });
+      setSendMessage(result);
+    } catch (error) {
+      const message = errorText(error, 'ლოკაციის მიღება ან სერვერზე გაგზავნა ვერ მოხერხდა.');
+      setLocationError(message);
+      setSendError(message);
+    } finally {
+      setLocationLoading(false);
+    }
+  }, [fcmToken]);
+
   useEffect(() => {
     let unsubscribe: () => void = () => undefined;
     let active = true;
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void refreshToken();
+        void updateAndSendLocation();
+      }
+    });
 
     void (async () => {
-      const [savedUrl, savedNotice] = await Promise.all([loadServerUrl(), loadNotice()]);
+      const [savedNotice, savedSharing, savedDeviceId, pending] = await Promise.all([
+        loadNotice(),
+        loadLocationSharing(),
+        loadDeviceId(),
+        isLocationSharingPending(),
+      ]);
       if (!active) {
         return;
       }
-      setServerUrl(savedUrl);
       if (savedNotice) {
         setNotice(savedNotice);
+      }
+      if (pending) {
+        try {
+          await syncSharingStatus(savedSharing, savedDeviceId);
+        } catch {
+          // Keep the pending flag so the settings screen can retry later.
+        }
       }
       unsubscribe = subscribeToPush((incoming) => {
         setNotice(incoming);
@@ -92,13 +195,31 @@ export default function App() {
     })();
 
     void refreshToken();
-    void refreshLocation();
-
+    void updateAndSendLocation();
     return () => {
       active = false;
       unsubscribe();
+      appStateSubscription.remove();
     };
-  }, [refreshLocation, refreshToken]);
+  }, [refreshToken, syncSharingStatus, updateAndSendLocation]);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void loadLocationSharing().then((enabled) => {
+      if (!active) return;
+      setSharingEnabled(enabled);
+      if (enabled) {
+        void refreshLocation();
+      } else {
+        setLocation(null);
+        setLocationError(null);
+      }
+    });
+    void refreshToken();
+    return () => {
+      active = false;
+    };
+  }, [refreshLocation, refreshToken]));
 
   const copyToken = useCallback(async () => {
     if (!fcmToken) {
@@ -110,8 +231,8 @@ export default function App() {
   }, [fcmToken]);
 
   const submitLocation = useCallback(async () => {
-    if (!fcmToken) {
-      setSendError('ჯერ საჭიროა FCM ტოკენი.');
+    if (!sharingEnabled) {
+      setSendError('ლოკაციის გასაგზავნად ჯერ ჩართეთ გაზიარება.');
       setSendMessage(null);
       return;
     }
@@ -125,13 +246,20 @@ export default function App() {
     setSendError(null);
     setSendMessage(null);
     try {
-      await saveServerUrl(serverUrl.trim());
-      const result = await sendLocation(serverUrl, {
-        fcmToken,
+      const deviceId = await loadDeviceId();
+      await registerDevice({
+        device_id: deviceId,
+        ...(fcmToken ? { push_token: fcmToken } : {}),
+        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web',
+        language: 'ka',
+        app_version: APP_VERSION,
+      });
+      const result = await sendLocation({
+        device_id: deviceId,
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy,
-        recordedAt: location.recordedAt,
+        recorded_at: location.recordedAt,
       });
       setSendMessage(result);
     } catch (error) {
@@ -139,7 +267,7 @@ export default function App() {
     } finally {
       setSending(false);
     }
-  }, [fcmToken, location, serverUrl]);
+  }, [fcmToken, location, sharingEnabled]);
 
   return (
     <SafeAreaProvider>
@@ -207,8 +335,13 @@ export default function App() {
             {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
             <Pressable
               accessibilityRole="button"
-              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              style={({ pressed }) => [
+                styles.button,
+                (!sharingEnabled || locationLoading) && styles.buttonDisabled,
+                pressed && sharingEnabled && styles.buttonPressed,
+              ]}
               onPress={() => void refreshLocation()}
+              disabled={!sharingEnabled || locationLoading}
             >
               <Text style={styles.buttonText}>ლოკაციის მიღება</Text>
             </Pressable>
@@ -217,18 +350,8 @@ export default function App() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>სერვერზე გაგზავნა</Text>
             <Text style={styles.meta}>
-              იგზავნება FCM ტოკენი, latitude და longitude. სერვერი ამ ტოკენზე აგზავნის push-ს.
+              მოწყობილობა რეგისტრირდება, შემდეგ კი მისი კოორდინატები სერვერს ეგზავნება.
             </Text>
-            <TextInput
-              value={serverUrl}
-              onChangeText={setServerUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              placeholder="http://192.168.0.10:3000/location"
-              placeholderTextColor="#8AA0B8"
-              style={styles.input}
-            />
             {sendMessage ? <Text style={styles.success}>{sendMessage}</Text> : null}
             {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
             <Pressable
@@ -236,10 +359,10 @@ export default function App() {
               style={({ pressed }) => [
                 styles.button,
                 (sending || pressed) && styles.buttonPressed,
-                sending && styles.buttonDisabled,
+                (sending || !sharingEnabled) && styles.buttonDisabled,
               ]}
               onPress={() => void submitLocation()}
-              disabled={sending}
+              disabled={sending || !sharingEnabled}
             >
               {sending ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -356,16 +479,6 @@ const styles = StyleSheet.create({
     color: '#0F4C81',
     fontSize: 15,
     fontWeight: '700',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#D9E2EC',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#102033',
-    backgroundColor: '#F8FBFE',
   },
   error: {
     color: '#A32020',

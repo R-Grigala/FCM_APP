@@ -1,7 +1,5 @@
-import { registerRootComponent } from 'expo';
 import { Platform } from 'react-native';
 
-import App from './App';
 import { showBackgroundNotice } from './src/notices';
 
 if (Platform.OS !== 'web') {
@@ -16,4 +14,4 @@ if (Platform.OS !== 'web') {
   }
 }
 
-registerRootComponent(App);
+import 'expo-router/entry';
