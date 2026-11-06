@@ -1,5 +1,7 @@
 import { Tabs } from 'expo-router';
 
+import { TabIcon } from '../../components/TabIcon';
+
 export default function TabLayout() {
   return (
     <Tabs
@@ -13,8 +15,30 @@ export default function TabLayout() {
         },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'მთავარი', tabBarLabel: 'მთავარი' }} />
-      <Tabs.Screen name="settings" options={{ title: 'პარამეტრები', tabBarLabel: 'პარამეტრები' }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'მთავარი',
+          tabBarLabel: 'მთავარი',
+          tabBarIcon: ({ color, size }) => <TabIcon name="home" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: 'რეპორტები',
+          tabBarLabel: 'რეპორტები',
+          tabBarIcon: ({ color, size }) => <TabIcon name="reports" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'პარამეტრები',
+          tabBarLabel: 'პარამეტრები',
+          tabBarIcon: ({ color, size }) => <TabIcon name="settings" color={color} size={size} />,
+        }}
+      />
     </Tabs>
   );
 }
