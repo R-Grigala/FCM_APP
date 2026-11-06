@@ -18,3 +18,12 @@ export type LocationPayload = {
   accuracy: number | null;
   recorded_at: string;
 };
+
+export type ReportPayload = {
+  device_id: string;
+  time_ago: number;
+  intensity: 'mild' | 'moderate' | 'severe';
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+};
