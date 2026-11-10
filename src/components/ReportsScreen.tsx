@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -29,10 +30,10 @@ const timeAgoMinutes: Record<TimeAgo, number> = {
   '5 წუთზე ნაკლები': 5,
   '30 წუთზე ნაკლები': 30,
 };
-const intensityOptions: { value: Intensity; title: string; image: number }[] = [
-  { value: 'mild', title: 'მსუბუქი', image: require('../../assets/images/mild.png') },
-  { value: 'moderate', title: 'საშუალო', image: require('../../assets/images/moderate.png') },
-  { value: 'severe', title: 'ძლიერი', image: require('../../assets/images/severe.png') },
+const intensityOptions: { value: Intensity; title: string; image: number; imageScale: number }[] = [
+  { value: 'mild', title: 'მსუბუქი', image: require('../../assets/images/mild.webp'), imageScale: 1.1 },
+  { value: 'moderate', title: 'საშუალო', image: require('../../assets/images/moderate.webp'), imageScale: 1 },
+  { value: 'severe', title: 'ძლიერი', image: require('../../assets/images/severe.webp'), imageScale: 1 },
 ];
 
 function formatLocation(location: LocationFix): string {
@@ -150,9 +151,12 @@ export default function ReportsScreen() {
               <Text style={styles.cardTitle}>როგორი იყო შენი შეგრძნება?</Text>
               <Text style={styles.counter}>{intensityIndex + 1} / {intensityOptions.length}</Text>
             </View>
-            <ScrollView
+            <FlatList
+              data={intensityOptions}
               horizontal
               pagingEnabled
+              keyExtractor={(option) => option.value}
+              extraData={intensity}
               style={styles.carousel}
               onLayout={(event) => {
                 const measuredWidth = event.nativeEvent.layout.width;
@@ -169,20 +173,22 @@ export default function ReportsScreen() {
                 const nextIndex = Math.round(event.nativeEvent.contentOffset.x / carouselWidth);
                 selectIntensity(Math.max(0, Math.min(nextIndex, intensityOptions.length - 1)));
               }}
-            >
-              {intensityOptions.map((option, index) => (
+              renderItem={({ item: option, index }) => (
                 <Pressable
-                  key={option.value}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: intensity === option.value }}
                   onPress={() => selectIntensity(index)}
                   style={[styles.intensityOption, { width: carouselWidth }, intensity === option.value && styles.selectedIntensity]}
                 >
                   <Text style={styles.intensityTitle}>{option.title}</Text>
-                  <Image source={option.image} style={styles.intensityImage} resizeMode="contain" />
+                  <Image
+                    source={option.image}
+                    style={[styles.intensityImage, { height: Math.max(carouselWidth - 4, 1), transform: [{ scaleX: option.imageScale }] }]}
+                    resizeMode="cover"
+                  />
                 </Pressable>
-              ))}
-            </ScrollView>
+              )}
+            />
             <View style={styles.dots}>
               {intensityOptions.map((option, index) => (
                 <View key={option.value} style={[styles.dot, index === intensityIndex && styles.activeDot]} />
@@ -228,7 +234,7 @@ const styles = StyleSheet.create({
   counter: { color: '#6B7D92', fontSize: 13, fontWeight: '700' },
   intensityOption: { alignItems: 'center', gap: 0, paddingTop: 0, borderWidth: 2, borderColor: '#D9E2EC', borderRadius: 16, overflow: 'hidden' },
   selectedIntensity: { borderColor: '#0F4C81', backgroundColor: '#F2F7FC' },
-  intensityImage: { width: '100%', aspectRatio: 1194 / 1317, backgroundColor: '#F2F6FA' },
+  intensityImage: { width: '100%', aspectRatio: 1, backgroundColor: '#F2F6FA' },
   intensityTitle: { width: '100%', paddingVertical: 12, color: '#102033', fontSize: 18, fontWeight: '700', textAlign: 'center' },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 7 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#C4D0DD' },
